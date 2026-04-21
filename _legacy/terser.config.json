@@ -1,0 +1,14 @@
+{
+  "compress": {
+    "collapse_vars": false,
+    "reduce_vars": false,
+    "reduce_funcs": false,
+    "inline": false,
+    "passes": 1
+  },
+  "mangle": false,
+  "format": {
+    "comments": false,
+    "beautify": false
+  }
+}
