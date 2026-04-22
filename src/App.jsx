@@ -1,7 +1,17 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import ProductCard from './ProductCard.jsx';
-import { PRODUCTS, DEALS, ALL_ITEMS, IMG_FALLBACK } from './catalog.js';
-import { formatOrderDate, orderStatusClass, orderStatusLabel, subtotalBuggy } from './utils.js';
+import { apiGet, apiPost } from './api.js';
+import { IMG_FALLBACK } from './constants.js';
+import { formatOrderDate, orderStatusClass, orderStatusLabel } from './utils.js';
+
+const EMPTY_SUMMARY = {
+  subtotal: 0,
+  delivery: 49,
+  discountAmount: 0,
+  total: 49,
+  couponApplied: false,
+  discountPercent: 0,
+};
 
 const CAT_PILLS = [
   { cat: 'all', ci: '🍽️', cn: 'All dishes' },
@@ -43,8 +53,6 @@ const CAROUSEL_SLIDES = [
     img: 'https://images.unsplash.com/photo-1504674900247-0877df9cc836?auto=format&w=800&q=80',
   },
 ];
-
-const VALID_COUPONS = { NEST10: 10, SAVE20: 20, FLAT50: 50 };
 
 function filterByCat(items, cat) {
   if (cat === 'all') return items;
@@ -96,16 +104,20 @@ export default function App() {
   const [activeCat, setActiveCat] = useState('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [searchOpen, setSearchOpen] = useState(false);
+  const [products, setProducts] = useState([]);
+  const [deals, setDeals] = useState([]);
+  const [catalogLoading, setCatalogLoading] = useState(true);
   const [cart, setCart] = useState([]);
   const [wishlist, setWishlist] = useState([]);
-  const [discount, setDiscount] = useState(0);
-  const [couponApplied, setCouponApplied] = useState(false);
+  const [effectiveCouponCode, setEffectiveCouponCode] = useState('');
+  const [summary, setSummary] = useState(EMPTY_SUMMARY);
   const [couponInput, setCouponInput] = useState('');
   const [couponMsg, setCouponMsg] = useState({ cls: '', text: '' });
   const [currentSlide, setCurrentSlide] = useState(0);
   const [timerH, setTimerH] = useState('00');
   const [timerM, setTimerM] = useState('00');
   const [timerS, setTimerS] = useState('00');
+  const [flashEndMs, setFlashEndMs] = useState(null);
   const [orderHistory, setOrderHistory] = useState([]);
   const [cartOpen, setCartOpen] = useState(false);
   const [notifOpen, setNotifOpen] = useState(false);
@@ -114,7 +126,6 @@ export default function App() {
   const [modalTotal, setModalTotal] = useState('');
   const [toasts, setToasts] = useState([]);
 
-  const endTimeRef = useRef(new Date());
   const featuredRef = useRef(null);
   const notifBtnRef = useRef(null);
   const notifPanelRef = useRef(null);
@@ -127,19 +138,7 @@ export default function App() {
     setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 2700);
   }, []);
 
-  const totals = useMemo(() => {
-    if (cart.length === 0) {
-      return { subtotal: 0, delivery: 49, discAmt: 0, total: 49 };
-    }
-    const subtotal = subtotalBuggy(cart);
-    const delivery = subtotal > 999 ? 0 : 49;
-    let discAmt = 0;
-    if (couponApplied) {
-      discAmt = Math.round((subtotal + delivery) * (discount / 100));
-    }
-    const total = Math.max(0, subtotal + delivery - discAmt);
-    return { subtotal, delivery, discAmt, total };
-  }, [cart, couponApplied, discount]);
+  const ALL_ITEMS = useMemo(() => [...products, ...deals], [products, deals]);
 
   const cartCount = useMemo(
     () => cart.reduce((sum, item) => sum + item.quantity, 0),
@@ -152,8 +151,8 @@ export default function App() {
     return ALL_ITEMS.filter((p) => p.name.toLowerCase().includes(q)).slice(0, 6);
   }, [searchQuery]);
 
-  const filteredProducts = useMemo(() => filterByCat(PRODUCTS, activeCat), [activeCat]);
-  const filteredDeals = useMemo(() => filterByCat(DEALS, activeCat), [activeCat]);
+  const filteredProducts = useMemo(() => filterByCat(products, activeCat), [products, activeCat]);
+  const filteredDeals = useMemo(() => filterByCat(deals, activeCat), [deals, activeCat]);
 
   const wishlistProducts = useMemo(() => {
     return wishlist.map((id) => ALL_ITEMS.find((p) => p.id === id)).filter(Boolean);
@@ -233,19 +232,20 @@ export default function App() {
     });
   }, []);
 
-  const applyCoupon = useCallback(() => {
-    const code = couponInput.trim().toUpperCase();
-    const pct = VALID_COUPONS[code];
-    if (pct != null) {
-      setDiscount(pct);
-      setCouponApplied(true);
-      setCouponMsg({ cls: 'ok', text: `🎉 ${pct}% discount applied!` });
-    } else {
-      setCouponApplied(false);
-      setDiscount(0);
-      setCouponMsg({ cls: 'err', text: '❌ Invalid code. Try NEST10' });
+  const applyCoupon = useCallback(async () => {
+    try {
+      const data = await apiPost('/api/coupon/apply', { code: couponInput });
+      if (data.ok) {
+        setEffectiveCouponCode(couponInput.trim().toUpperCase());
+        setCouponMsg({ cls: 'ok', text: `🎉 ${data.percent}% discount applied!` });
+      } else {
+        setEffectiveCouponCode('');
+        setCouponMsg({ cls: 'err', text: data.errorMessage || '❌ Invalid code' });
+      }
+    } catch {
+      showToast('Could not verify coupon');
     }
-  }, [couponInput]);
+  }, [couponInput, showToast]);
 
   const openCart = useCallback(() => {
     setCartOpen(true);
@@ -257,33 +257,40 @@ export default function App() {
     document.body.style.overflow = '';
   }, []);
 
-  const checkout = useCallback(() => {
+  const checkout = useCallback(async () => {
     if (checkoutInFlight.current) return;
     if (cart.length === 0) {
       showToast('🥡 Your bag is empty');
       return;
     }
     checkoutInFlight.current = true;
-    const t = totals;
-    const estDate = new Date(Date.now() + 3 * 86400000);
-    setOrderHistory((h) => [
-      {
-        id: 'MN' + Date.now().toString().slice(-6),
-        date: formatOrderDate(new Date()),
-        status: 'processing',
-        items: cart.map((line) => ({
-          image: line.product.image,
-          name: line.product.name,
-          qty: line.quantity,
-        })),
-        total: t.total,
-        estimated: formatOrderDate(estDate),
-      },
-      ...h,
-    ]);
-    setModalTotal(`₹${t.total.toLocaleString('en-IN')}.00`);
-    setCheckoutOpen(true);
-  }, [cart, totals, showToast]);
+    try {
+      const lines = cart.map((l) => ({ productId: l.product.id, quantity: l.quantity }));
+      const t = await apiPost('/api/cart/summary', { lines, couponCode: effectiveCouponCode });
+      const estDate = new Date(Date.now() + 3 * 86400000);
+      setOrderHistory((h) => [
+        {
+          id: 'MN' + Date.now().toString().slice(-6),
+          date: formatOrderDate(new Date()),
+          status: 'processing',
+          items: cart.map((line) => ({
+            image: line.product.image,
+            name: line.product.name,
+            qty: line.quantity,
+          })),
+          total: t.total,
+          estimated: formatOrderDate(estDate),
+        },
+        ...h,
+      ]);
+      setModalTotal(`₹${t.total.toLocaleString('en-IN')}.00`);
+      setSummary(t);
+      setCheckoutOpen(true);
+    } catch {
+      checkoutInFlight.current = false;
+      showToast('Could not place order — check connection');
+    }
+  }, [cart, effectiveCouponCode, showToast]);
 
   useEffect(() => {
     if (!checkoutOpen) checkoutInFlight.current = false;
@@ -291,10 +298,10 @@ export default function App() {
 
   const clearCartState = useCallback(() => {
     setCart([]);
-    setCouponApplied(false);
-    setDiscount(0);
+    setEffectiveCouponCode('');
     setCouponInput('');
     setCouponMsg({ cls: '', text: '' });
+    setSummary(EMPTY_SUMMARY);
     closeCart();
   }, [closeCart]);
 
@@ -317,7 +324,42 @@ export default function App() {
   }
 
   useEffect(() => {
-    const endTime = endTimeRef.current;
+    let cancelled = false;
+    (async () => {
+      try {
+        const data = await apiGet('/api/products');
+        if (cancelled) return;
+        setProducts(data.products);
+        setDeals(data.deals);
+      } catch {
+        if (!cancelled) showToast('Could not load menu — is the API running?');
+      } finally {
+        if (!cancelled) setCatalogLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [showToast]);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const { endMs } = await apiGet('/api/flash');
+        if (!cancelled) setFlashEndMs(endMs);
+      } catch {
+        if (!cancelled) setFlashEndMs(Date.now());
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (flashEndMs == null) return;
+    const endTime = new Date(flashEndMs);
     function tick() {
       const now = new Date();
       const remaining = endTime - now;
@@ -334,7 +376,23 @@ export default function App() {
     tick();
     const id = setInterval(tick, 1000);
     return () => clearInterval(id);
-  }, []);
+  }, [flashEndMs]);
+
+  useEffect(() => {
+    if (catalogLoading && products.length === 0) return;
+    const lines = cart.map((l) => ({ productId: l.product.id, quantity: l.quantity }));
+    const tmr = setTimeout(() => {
+      (async () => {
+        try {
+          const s = await apiPost('/api/cart/summary', { lines, couponCode: effectiveCouponCode });
+          setSummary(s);
+        } catch {
+          showToast('Could not update bag totals');
+        }
+      })();
+    }, 150);
+    return () => clearTimeout(tmr);
+  }, [cart, effectiveCouponCode, catalogLoading, products.length, showToast]);
 
   useEffect(() => {
     function onDocClick(e) {
@@ -680,15 +738,21 @@ export default function App() {
             </a>
           </div>
           <div className="products-grid" id="productsGrid">
-            {filteredProducts.map((p) => (
-              <ProductCard
-                key={p.id}
-                product={p}
-                wishlisted={wishlist.includes(p.id)}
-                onWish={toggleWish}
-                onAdd={addToCart}
-              />
-            ))}
+            {catalogLoading ? (
+              <p style={{ gridColumn: '1 / -1', textAlign: 'center', color: 'var(--warm-gray)' }}>Loading menu…</p>
+            ) : filteredProducts.length === 0 ? (
+              <p style={{ gridColumn: '1 / -1', textAlign: 'center', color: 'var(--warm-gray)' }}>No dishes in this category.</p>
+            ) : (
+              filteredProducts.map((p) => (
+                <ProductCard
+                  key={p.id}
+                  product={p}
+                  wishlisted={wishlist.includes(p.id)}
+                  onWish={toggleWish}
+                  onAdd={addToCart}
+                />
+              ))
+            )}
           </div>
         </section>
 
@@ -713,15 +777,21 @@ export default function App() {
             </a>
           </div>
           <div className="products-grid" id="dealsGrid">
-            {filteredDeals.map((p) => (
-              <ProductCard
-                key={p.id}
-                product={p}
-                wishlisted={wishlist.includes(p.id)}
-                onWish={toggleWish}
-                onAdd={addToCart}
-              />
-            ))}
+            {catalogLoading ? (
+              <p style={{ gridColumn: '1 / -1', textAlign: 'center', color: 'var(--white)' }}>Loading combos…</p>
+            ) : filteredDeals.length === 0 ? (
+              <p style={{ gridColumn: '1 / -1', textAlign: 'center', color: 'rgba(255,255,255,0.6)' }}>No combos in this filter.</p>
+            ) : (
+              filteredDeals.map((p) => (
+                <ProductCard
+                  key={p.id}
+                  product={p}
+                  wishlisted={wishlist.includes(p.id)}
+                  onWish={toggleWish}
+                  onAdd={addToCart}
+                />
+              ))
+            )}
           </div>
         </section>
 
@@ -969,21 +1039,21 @@ export default function App() {
           </div>
           <div className="summary-row">
             <span>Subtotal</span>
-            <span id="subtotalDisplay">₹{totals.subtotal.toLocaleString('en-IN')}.00</span>
+            <span id="subtotalDisplay">₹{summary.subtotal.toLocaleString('en-IN')}.00</span>
           </div>
           <div className="summary-row">
             <span>Discount</span>
             <span id="discountDisplay" style={{ color: 'var(--green)' }}>
-              -₹{totals.discAmt.toLocaleString('en-IN')}.00
+              -₹{summary.discountAmount.toLocaleString('en-IN')}.00
             </span>
           </div>
           <div className="summary-row">
             <span>Delivery fee</span>
-            <span id="deliveryDisplay">{totals.delivery === 0 ? 'FREE' : `₹${totals.delivery}.00`}</span>
+            <span id="deliveryDisplay">{summary.delivery === 0 ? 'FREE' : `₹${summary.delivery}.00`}</span>
           </div>
           <div className="summary-row total">
             <span>Total</span>
-            <span id="totalDisplay">₹{totals.total.toLocaleString('en-IN')}.00</span>
+            <span id="totalDisplay">₹{summary.total.toLocaleString('en-IN')}.00</span>
           </div>
           <button type="button" className="checkout-btn" onClick={checkout}>
             Place order →

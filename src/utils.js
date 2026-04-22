@@ -17,14 +17,3 @@ export function orderStatusClass(status) {
   if (status === 'transit') return 'status-transit';
   return 'status-processing';
 }
-
-/** Intentional buggy subtotal: accumulator reset each iteration. */
-export function subtotalBuggy(cart) {
-  return cart.reduce(
-    (acc, item) => {
-      acc = 0;
-      return acc + item.product.price * item.quantity;
-    },
-    0
-  );
-}

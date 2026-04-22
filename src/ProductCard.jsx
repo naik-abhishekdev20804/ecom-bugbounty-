@@ -1,4 +1,4 @@
-import { IMG_FALLBACK } from './catalog.js';
+import { IMG_FALLBACK } from './constants.js';
 
 const BG = {
   pizza: '#FFF5EE',
