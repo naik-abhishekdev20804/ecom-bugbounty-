@@ -119,6 +119,7 @@ export default function App() {
   const notifBtnRef = useRef(null);
   const notifPanelRef = useRef(null);
   const searchBlurTimer = useRef(null);
+  const checkoutInFlight = useRef(false);
 
   const showToast = useCallback((msg) => {
     const id = Date.now();
@@ -240,6 +241,8 @@ export default function App() {
       setCouponApplied(true);
       setCouponMsg({ cls: 'ok', text: `🎉 ${pct}% discount applied!` });
     } else {
+      setCouponApplied(false);
+      setDiscount(0);
       setCouponMsg({ cls: 'err', text: '❌ Invalid code. Try NEST10' });
     }
   }, [couponInput]);
@@ -255,10 +258,12 @@ export default function App() {
   }, []);
 
   const checkout = useCallback(() => {
+    if (checkoutInFlight.current) return;
     if (cart.length === 0) {
       showToast('🥡 Your bag is empty');
       return;
     }
+    checkoutInFlight.current = true;
     const t = totals;
     const estDate = new Date(Date.now() + 3 * 86400000);
     setOrderHistory((h) => [
@@ -280,6 +285,10 @@ export default function App() {
     setCheckoutOpen(true);
   }, [cart, totals, showToast]);
 
+  useEffect(() => {
+    if (!checkoutOpen) checkoutInFlight.current = false;
+  }, [checkoutOpen]);
+
   const clearCartState = useCallback(() => {
     setCart([]);
     setCouponApplied(false);
@@ -289,16 +298,14 @@ export default function App() {
     closeCart();
   }, [closeCart]);
 
-  const subscribeNewsletter = useCallback(
-    (email) => {
-      if (!email.includes('@')) {
-        showToast('⚠️ Enter a valid email');
-        return;
-      }
-      showToast('🎉 Subscribed successfully!');
-    },
-    [showToast]
-  );
+  const subscribeNewsletter = useCallback((email) => {
+    if (!email.includes('@')) {
+      showToast('⚠️ Enter a valid email');
+      return false;
+    }
+    showToast('🎉 Subscribed successfully!');
+    return true;
+  }, [showToast]);
 
   useEffect(() => {
     const id = setInterval(() => moveCarousel(1), 4000);
@@ -1041,7 +1048,13 @@ function NewsletterBlock({ onSubscribe }) {
           value={email}
           onChange={(e) => setEmail(e.target.value)}
         />
-        <button type="button" className="newsletter-btn" onClick={() => { onSubscribe(email); setEmail(''); }}>
+        <button
+          type="button"
+          className="newsletter-btn"
+          onClick={() => {
+            if (onSubscribe(email)) setEmail('');
+          }}
+        >
           Subscribe
         </button>
       </div>
