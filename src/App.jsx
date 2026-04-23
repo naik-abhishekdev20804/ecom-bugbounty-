@@ -202,7 +202,7 @@ export default function App() {
       setCart((c) => [...c, { product: p, quantity: 1 }]);
       showToast(`✅ ${p.name} added to bag`);
     },
-    [showToast]
+    [showToast, ALL_ITEMS]
   );
 
   const toggleWish = useCallback(
