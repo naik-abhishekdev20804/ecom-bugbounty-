@@ -6,9 +6,9 @@ import { formatOrderDate, orderStatusClass, orderStatusLabel } from './utils.js'
 
 const EMPTY_SUMMARY = {
   subtotal: 0,
-  delivery: 49,
+  delivery: 0,
   discountAmount: 0,
-  total: 49,
+  total: 0,
   couponApplied: false,
   discountPercent: 0,
 };
@@ -149,7 +149,7 @@ export default function App() {
     const q = searchQuery.trim().toLowerCase();
     if (!q) return [];
     return ALL_ITEMS.filter((p) => p.name.toLowerCase().includes(q)).slice(0, 6);
-  }, [searchQuery]);
+  }, [searchQuery, ALL_ITEMS]);
 
   const filteredProducts = useMemo(() => filterByCat(products, activeCat), [products, activeCat]);
   const filteredDeals = useMemo(() => filterByCat(deals, activeCat), [deals, activeCat]);
@@ -1049,7 +1049,13 @@ export default function App() {
           </div>
           <div className="summary-row">
             <span>Delivery fee</span>
-            <span id="deliveryDisplay">{summary.delivery === 0 ? 'FREE' : `₹${summary.delivery}.00`}</span>
+            <span id="deliveryDisplay">
+              {summary.delivery === 0
+                ? summary.subtotal > 999
+                  ? 'FREE'
+                  : '₹0.00'
+                : `₹${summary.delivery}.00`}
+            </span>
           </div>
           <div className="summary-row total">
             <span>Total</span>
