@@ -22,7 +22,7 @@ export default function ProductCard({ product, wishlisted, onWish, onAdd }) {
   const fullStars = '★'.repeat(5);
 
   return (
-    <div className="product-card" data-cat={product.cat}>
+    <div className="product-card" data-cat={product.cat} id={`product-${product.id}`}>
       <div className="prod-img" style={{ background: bg }}>
         {product.badge ? (
           <span className={`badge ${product.badge}`}>

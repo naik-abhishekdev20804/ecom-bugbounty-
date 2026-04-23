@@ -195,6 +195,19 @@ export default function App() {
     []
   );
 
+  /** Search picks a dish on the menu; user adds from the card (no auto-add to bag). */
+  const goToProductFromSearch = useCallback((p) => {
+    setPage('home');
+    setActiveNav('home');
+    setActiveCat('all');
+    setSearchOpen(false);
+    setSearchQuery('');
+    const elId = `product-${p.id}`;
+    setTimeout(() => {
+      document.getElementById(elId)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }, 100);
+  }, []);
+
   const addToCart = useCallback(
     (id) => {
       const p = ALL_ITEMS.find((x) => x.id === id);
@@ -506,11 +519,7 @@ export default function App() {
                     key={p.id}
                     className="sr-item"
                     onMouseDown={(e) => e.preventDefault()}
-                    onClick={() => {
-                      addToCart(p.id);
-                      setSearchOpen(false);
-                      setSearchQuery('');
-                    }}
+                    onClick={() => goToProductFromSearch(p)}
                   >
                     <img className="sr-thumb" src={p.image} alt="" referrerPolicy="no-referrer" onError={imgErr} />
                     <span>
