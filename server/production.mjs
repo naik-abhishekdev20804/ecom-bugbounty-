@@ -25,7 +25,7 @@ app.get('/api/products', (_req, res) => {
 
 app.get('/api/flash', (_req, res) => {
   res.setHeader('Cache-Control', 'no-store');
-  res.json({ endMs: Date.now() });
+  res.json({ endMs: Date.now() + 2 * 60 * 60 * 1000 });
 });
 
 app.post('/api/cart/summary', (req, res) => {
